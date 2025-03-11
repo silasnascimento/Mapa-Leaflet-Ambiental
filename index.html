@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebGIS Ambiental com Leaflet</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+        .period-container {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 10px;
+            position: relative;
+        }
+        .remove-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: red;
+            cursor: pointer;
+        }
+        #add-period {
+            margin: 10px 0;
+        }
+        #info {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h2>WebGIS Ambiental com Leaflet</h2>
+    <p>Desenhe uma área no mapa para obter informações ambientais.</p>
+    <div id="map" style="height: 500px;"></div>
+    
+    <div id="controls">
+        <input type="text" id="address" placeholder="Digite um endereço">
+        <button id="geocodeButton">Buscar Endereço</button>
+        <br><br>
+        
+        <div id="periods">
+            <div class="period-container" data-period="1">
+                <label>Nome do Período:</label>
+                <input type="text" class="period-name" placeholder="Ex.: Período 1"><br>
+                <label>Data Inicial:</label>
+                <input type="date" class="start-date" value="2024-01-01"><br>
+                <label>Data Final:</label>
+                <input type="date" class="end-date" value="2024-01-28"><br>
+                <span class="remove-btn" onclick="removePeriod(this)">X</span>
+            </div>
+        </div>
+        <button type="button" id="add-period">Adicionar Novo Período</button><br><br>
+        <button id="updateDataButton">Atualizar Dados</button>
+    </div>
+    
+    <div id="info"></div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
