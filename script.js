@@ -119,7 +119,7 @@ function updateData(coords) {
 function fetchEnvironmentalData(geojson, periodData) {
     document.getElementById('info').innerHTML = "Buscando dados ambientais...";
     
-    fetch('https://18.207.218.243:443/calculate_ndvi', {
+    fetch('https://18.207.218.243:5000/calculate_ndvi', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ roi: geojson, ...periodData })
@@ -157,7 +157,7 @@ function fetchEnvironmentalData(geojson, periodData) {
 
 // Função para buscar tiles NDVI
 function fetchNDVITiles(geojson, periodData) {
-    fetch('https://18.207.218.243:443/get_ndvi_tiles', {
+    fetch('https://18.207.218.243:5000/get_ndvi_tiles', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ roi: geojson, ...periodData })
