@@ -1,220 +1,594 @@
-// Inicializando o mapa
-var map = L.map('map').setView([-15.7801, -47.9292], 4);
+// Inicialização do mapa Leaflet
+let map;
+let drawnItems;
+let currentPolygon = null;
+let periodCount = 0;
+let ndviLayers = {};
+let rgbLayers = {};
 
-// Definindo camadas base
-var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-});
-var googleMaps = L.tileLayer('http://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
-    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-    attribution: '© Google Maps'
-});
-var esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-    attribution: 'Tiles © Esri'
-});
-osm.addTo(map);
-
-// Definindo grupos para o controle de camadas
-var baseMaps = {
-    "OpenStreetMap": osm,
-    "Google Maps": googleMaps,
-    "Esri World Imagery": esri
+// URLs dos mapas base
+const basemaps = {
+    osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
 };
-var overlayMaps = {}; // Para as camadas NDVI
 
-// Controle de camadas (inicializado com basemaps e overlays)
-var layerControl = L.control.layers(baseMaps, overlayMaps).addTo(map);
-
-// Adicionando ferramenta de desenho
-var drawnItems = new L.FeatureGroup();
-map.addLayer(drawnItems);
-
-var drawControl = new L.Control.Draw({
-    edit: { featureGroup: drawnItems },
-    draw: {
-        polygon: true,
-        polyline: false,
-        circle: false,
-        rectangle: true,
-        marker: false,
-        circlemarker: false
-    }
-});
-map.addControl(drawControl);
-
-// Adicionar novo período dinamicamente
-document.getElementById('add-period').addEventListener('click', function() {
-    const periodsDiv = document.getElementById('periods');
-    const periodCount = periodsDiv.children.length + 1;
-    const newPeriod = document.createElement('div');
-    newPeriod.className = 'period-container';
-    newPeriod.dataset.period = periodCount;
-    newPeriod.innerHTML = `
-        <label>Nome do Período:</label>
-        <input type="text" class="period-name" placeholder="Ex.: Período ${periodCount}"><br>
-        <label>Data Inicial:</label>
-        <input type="date" class="start-date"><br>
-        <label>Data Final:</label>
-        <input type="date" class="end-date"><br>
-        <span class="remove-btn" onclick="removePeriod(this)">X</span>
-    `;
-    periodsDiv.appendChild(newPeriod);
-});
-
-// Remover um período
-function removePeriod(element) {
-    const periodDiv = element.parentElement;
-    if (document.querySelectorAll('.period-container').length > 1) {
-        periodDiv.remove();
-    } else {
-        alert('Pelo menos um período é necessário!');
-    }
-}
-
-// Função para coletar períodos
-function getPeriods() {
-    const periods = document.querySelectorAll('.period-container');
-    const periodData = {};
-    periods.forEach((period, index) => {
-        const periodNum = index + 1;
-        const startDate = period.querySelector('.start-date').value;
-        const endDate = period.querySelector('.end-date').value;
-        if (startDate && endDate) {
-            periodData[`start_date_period_${periodNum}`] = startDate;
-            periodData[`end_date_period_${periodNum}`] = endDate;
-        }
+// Inicialização do mapa
+function initMap() {
+    map = L.map('map', {
+        center: [-15.7801, -47.9292], // Centro do Brasil
+        zoom: 5,
+        zoomControl: false
     });
-    return periodData;
-}
 
-// Quando o usuário desenha um polígono
-map.on(L.Draw.Event.CREATED, function(event) {
-    var layer = event.layer;
-    drawnItems.clearLayers(); // Limpa desenhos anteriores
-    drawnItems.addLayer(layer);
-    updateData(layer.getLatLngs());
-});
+    // Adiciona o mapa base OSM por padrão
+    L.tileLayer(basemaps.osm, {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
 
-// Atualizar dados ao clicar no botão
-document.getElementById('updateDataButton').addEventListener('click', function() {
-    if (drawnItems.getLayers().length > 0) {
-        updateData(drawnItems.getLayers()[0].getLatLngs());
-    } else {
-        alert('Desenhe uma área no mapa primeiro!');
-    }
-});
+    // Adiciona controles de zoom
+    L.control.zoom({
+        position: 'bottomright'
+    }).addTo(map);
 
-// Função para atualizar dados
-function updateData(coords) {
-    const geojson = {
-        type: "Polygon",
-        coordinates: [coords[0].map(latlng => [latlng.lng, latlng.lat])]
-    };
-    const periodData = getPeriods();
-    fetchEnvironmentalData(geojson, periodData);
-    fetchNDVITiles(geojson, periodData);
-}
+    // Inicializa a camada de desenho
+    drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
 
-// Função para buscar dados ambientais (NDVI médio)
-function fetchEnvironmentalData(geojson, periodData) {
-    document.getElementById('info').innerHTML = "Buscando dados ambientais...";
-    
-    fetch('http://212.85.2.191:5000/calculate_ndvi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roi: geojson, ...periodData })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            document.getElementById('info').innerHTML = `Erro: ${data.error}`;
-        } else {
-            let html = '<b>Dados Ambientais:</b><ul>';
-            const periods = document.querySelectorAll('.period-container');
-            periods.forEach((period, index) => {
-                const periodNum = index + 1;
-                const periodName = period.querySelector('.period-name').value || `Período ${periodNum}`;
-                const periodData = data[`period_${periodNum}`];
-                if (periodData) {
-                    html += `
-                        <li><b>${periodName} (${period.querySelector('.start-date').value} - ${period.querySelector('.end-date').value}):</b>
-                            <ul>
-                                <li>NDVI médio: ${periodData.ndvi_mean?.toFixed(4) || 'N/A'}</li>
-                                <li>NDVI mínimo: ${periodData.ndvi_min?.toFixed(4) || 'N/A'}</li>
-                                <li>NDVI máximo: ${periodData.ndvi_max?.toFixed(4) || 'N/A'}</li>
-                            </ul>
-                        </li>`;
+    // Adiciona controles de desenho
+    const drawControl = new L.Control.Draw({
+        draw: {
+            polyline: false,
+            rectangle: false,
+            circle: false,
+            circlemarker: false,
+            marker: false,
+            polygon: {
+                allowIntersection: false,
+                drawError: {
+                    color: '#e1e100',
+                    message: '<strong>Erro:</strong> Polígonos não podem se intersectar!'
+                },
+                shapeOptions: {
+                    color: '#007bff',
+                    fillOpacity: 0
                 }
-            });
-            html += '</ul>';
-            document.getElementById('info').innerHTML = html;
-        }
-    })
-    .catch(err => {
-        document.getElementById('info').innerHTML = `Erro ao conectar com o servidor: ${err}`;
-    });
-}
-
-// Função para buscar tiles NDVI
-function fetchNDVITiles(geojson, periodData) {
-    fetch('http://212.85.2.191:5000/get_ndvi_tiles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roi: geojson, ...periodData })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            document.getElementById('info').innerHTML += `<br>Erro ao carregar tiles NDVI: ${data.error}`;
-        } else {
-            // Remove camadas NDVI anteriores
-            if (window.ndviLayers) {
-                Object.values(window.ndviLayers).forEach(layer => map.removeLayer(layer));
-                Object.keys(window.ndviLayers).forEach(key => delete overlayMaps[key]);
             }
-            window.ndviLayers = {};
-
-            const periods = document.querySelectorAll('.period-container');
-            periods.forEach((period, index) => {
-                const periodNum = index + 1;
-                const periodName = period.querySelector('.period-name').value || `Período ${periodNum}`;
-                const tileUrl = data[`period_${periodNum}`]?.tile_url;
-                if (tileUrl) {
-                    window.ndviLayers[periodName] = L.tileLayer(tileUrl, {
-                        attribution: `NDVI - ${periodName}`,
-                        opacity: 0.7
-                    });
-                    overlayMaps[`NDVI ${periodName}`] = window.ndviLayers[periodName];
-                }
-            });
-
-            // Atualiza o controle de camadas sem recriá-lo
-            layerControl.remove();
-            layerControl = L.control.layers(baseMaps, overlayMaps).addTo(map);
-
-            document.getElementById('info').innerHTML += "<br>Tiles NDVI carregados com sucesso!";
+        },
+        edit: {
+            featureGroup: drawnItems,
+            remove: true
         }
+    });
+    map.addControl(drawControl);
+
+    // Eventos de desenho
+    map.on('draw:created', onDrawCreated);
+    map.on('draw:edited', onDrawEdited);
+    map.on('draw:deleted', onDrawDeleted);
+}
+
+// Manipulador de evento quando um polígono é desenhado
+function onDrawCreated(e) {
+    drawnItems.clearLayers();
+    drawnItems.addLayer(e.layer);
+    currentPolygon = e.layer;
+    updateLayerControls();
+}
+
+// Manipulador de evento quando um polígono é editado
+function onDrawEdited(e) {
+    const layers = e.layers;
+    layers.eachLayer(function(layer) {
+        currentPolygon = layer;
+    });
+    updateLayerControls();
+}
+
+// Manipulador de evento quando um polígono é deletado
+function onDrawDeleted(e) {
+    currentPolygon = null;
+    updateLayerControls();
+}
+
+// Atualiza os controles de camada com base no polígono atual
+function updateLayerControls() {
+    const layerControls = document.getElementById('layer-controls');
+    layerControls.innerHTML = '';
+    
+    if (currentPolygon) {
+        // Adiciona botão para processar o polígono
+        const processButton = document.createElement('button');
+        processButton.className = 'btn-primary';
+        processButton.innerHTML = '<i class="fas fa-calculator"></i> Processar NDVI';
+        processButton.addEventListener('click', processPolygon);
+        layerControls.appendChild(processButton);
+    }
+}
+
+// Processa o polígono desenhado
+function processPolygon() {
+    if (!currentPolygon) {
+        alert('Por favor, desenhe um polígono primeiro.');
+        return;
+    }
+
+    if (periodCount === 0) {
+        alert('Por favor, adicione pelo menos um período de data.');
+        return;
+    }
+
+    // Obtém as coordenadas do polígono
+    const coordinates = currentPolygon.getLatLngs()[0].map(latlng => [latlng.lng, latlng.lat]);
+    coordinates.push(coordinates[0]); // Fecha o polígono
+
+    // Prepara os dados para enviar ao servidor
+    const requestData = {
+        roi: {
+            type: 'Polygon',
+            coordinates: [coordinates]
+        }
+    };
+
+    // Adiciona os períodos de data
+    const periodElements = document.querySelectorAll('.period-item');
+    periodElements.forEach((element, index) => {
+        const startDate = element.querySelector(`#start-date-period-${index + 1}`).value;
+        const endDate = element.querySelector(`#end-date-period-${index + 1}`).value;
+        requestData[`start_date_period_${index + 1}`] = startDate;
+        requestData[`end_date_period_${index + 1}`] = endDate;
+    });
+
+    // Faz as requisições para o servidor
+    fetchNDVIData(requestData);
+    fetchNDVITiles(requestData);
+    fetchImageTiles(requestData);
+}
+
+// Busca os dados de NDVI do servidor
+function fetchNDVIData(requestData) {
+    fetch('https://api.setmapgeo.com/calculate_ndvi', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
     })
-    .catch(err => {
-        document.getElementById('info').innerHTML += `<br>Erro ao conectar ao servidor: ${err}`;
+    .then(response => response.json())
+    .then(data => {
+        displayNDVIResults(data);
+    })
+    .catch(error => {
+        console.error('Erro ao buscar dados NDVI:', error);
+        alert('Erro ao buscar dados NDVI. Verifique o console para mais detalhes.');
     });
 }
 
-// Geocodificação Nominatim
-document.getElementById('geocodeButton').addEventListener('click', function() {
-    const address = document.getElementById('address').value;
-    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`)
+// Busca os tiles de NDVI do servidor
+function fetchNDVITiles(requestData) {
+    fetch('https://api.setmapgeo.com/get_ndvi_tiles', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        addNDVILayers(data);
+    })
+    .catch(error => {
+        console.error('Erro ao buscar tiles NDVI:', error);
+        alert('Erro ao buscar tiles NDVI. Verifique o console para mais detalhes.');
+    });
+}
+
+// Busca os tiles de imagem RGB do servidor
+function fetchImageTiles(requestData) {
+    fetch('https://api.setmapgeo.com/get_image_tile', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        addRGBLayers(data);
+    })
+    .catch(error => {
+        console.error('Erro ao buscar tiles de imagem:', error);
+        alert('Erro ao buscar tiles de imagem. Verifique o console para mais detalhes.');
+    });
+}
+
+// Adiciona as camadas de NDVI ao mapa
+function addNDVILayers(data) {
+    // Remove camadas anteriores
+    Object.values(ndviLayers).forEach(layer => {
+        if (map.hasLayer(layer)) {
+            map.removeLayer(layer);
+        }
+    });
+    ndviLayers = {};
+
+    // Adiciona novas camadas
+    for (const [period, layerData] of Object.entries(data)) {
+        const ndviLayer = L.tileLayer(layerData.tile_url, {
+            opacity: 1
+        });
+        ndviLayers[period] = ndviLayer;
+        
+        // Adiciona ao controle de camadas
+        const layerControl = document.createElement('div');
+        layerControl.className = 'layer-control-item';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `ndvi-${period}`;
+        checkbox.addEventListener('change', function() {
+            if (this.checked) {
+                map.addLayer(ndviLayers[period]);
+            } else {
+                map.removeLayer(ndviLayers[period]);
+            }
+        });
+        
+        const label = document.createElement('label');
+        label.htmlFor = `ndvi-${period}`;
+        
+        // Obter o nome personalizado do período, se existir
+        const periodNumber = period.split('_')[1];
+        const periodElement = document.getElementById(`period-${periodNumber}`);
+        let periodName = period.replace('period_', 'Período ');
+        
+        if (periodElement) {
+            const nameInput = periodElement.querySelector('.period-name-input');
+            if (nameInput && nameInput.value !== nameInput.getAttribute('data-default-value')) {
+                periodName = nameInput.value;
+            }
+        }
+        
+        label.textContent = `NDVI ${periodName}`;
+        
+        layerControl.appendChild(checkbox);
+        layerControl.appendChild(label);
+        document.getElementById('layer-controls').appendChild(layerControl);
+    }
+}
+
+// Adiciona as camadas de imagem RGB ao mapa
+function addRGBLayers(data) {
+    // Remove camadas anteriores
+    Object.values(rgbLayers).forEach(layer => {
+        if (map.hasLayer(layer)) {
+            map.removeLayer(layer);
+        }
+    });
+    rgbLayers = {};
+
+    // Adiciona novas camadas
+    for (const [period, layerData] of Object.entries(data)) {
+        const rgbLayer = L.tileLayer(layerData.tile_url, {
+            opacity: 1
+        });
+        rgbLayers[period] = rgbLayer;
+        
+        // Adiciona ao controle de camadas
+        const layerControl = document.createElement('div');
+        layerControl.className = 'layer-control-item';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `rgb-${period}`;
+        checkbox.addEventListener('change', function() {
+            if (this.checked) {
+                map.addLayer(rgbLayers[period]);
+            } else {
+                map.removeLayer(rgbLayers[period]);
+            }
+        });
+        
+        const label = document.createElement('label');
+        label.htmlFor = `rgb-${period}`;
+        
+        // Obter o nome personalizado do período, se existir
+        const periodNumber = period.split('_')[1];
+        const periodElement = document.getElementById(`period-${periodNumber}`);
+        let periodName = period.replace('period_', 'Período ');
+        
+        if (periodElement) {
+            const nameInput = periodElement.querySelector('.period-name-input');
+            if (nameInput && nameInput.value !== nameInput.getAttribute('data-default-value')) {
+                periodName = nameInput.value;
+            }
+        }
+        
+        label.textContent = `RGB ${periodName}`;
+        
+        layerControl.appendChild(checkbox);
+        layerControl.appendChild(label);
+        document.getElementById('layer-controls').appendChild(layerControl);
+    }
+}
+
+// Exibe os resultados de NDVI na sidebar
+function displayNDVIResults(data) {
+    const ndviResultsContainer = document.getElementById('ndvi-results');
+    ndviResultsContainer.innerHTML = '';
+
+    for (const [period, stats] of Object.entries(data)) {
+        const periodResult = document.createElement('div');
+        periodResult.className = 'ndvi-period-result';
+        
+        const periodTitle = document.createElement('h4');
+        
+        // Obter o nome personalizado do período, se existir
+        const periodNumber = period.split('_')[1];
+        const periodElement = document.getElementById(`period-${periodNumber}`);
+        let periodName = period.replace('period_', 'Período ');
+        
+        if (periodElement) {
+            const nameInput = periodElement.querySelector('.period-name-input');
+            if (nameInput && nameInput.value !== nameInput.getAttribute('data-default-value')) {
+                periodName = nameInput.value;
+            }
+        }
+        
+        periodTitle.textContent = periodName;
+        periodResult.appendChild(periodTitle);
+        
+        const statsContainer = document.createElement('div');
+        statsContainer.className = 'ndvi-stats';
+        
+        // Média
+        const meanStat = document.createElement('div');
+        meanStat.className = 'ndvi-stat';
+        meanStat.innerHTML = `
+            <div class="ndvi-stat-label">Média</div>
+            <div class="ndvi-stat-value">${stats.ndvi_mean.toFixed(4)}</div>
+        `;
+        statsContainer.appendChild(meanStat);
+        
+        // Mínimo
+        const minStat = document.createElement('div');
+        minStat.className = 'ndvi-stat';
+        minStat.innerHTML = `
+            <div class="ndvi-stat-label">Mínimo</div>
+            <div class="ndvi-stat-value">${stats.ndvi_min.toFixed(4)}</div>
+        `;
+        statsContainer.appendChild(minStat);
+        
+        // Máximo
+        const maxStat = document.createElement('div');
+        maxStat.className = 'ndvi-stat';
+        maxStat.innerHTML = `
+            <div class="ndvi-stat-label">Máximo</div>
+            <div class="ndvi-stat-value">${stats.ndvi_max.toFixed(4)}</div>
+        `;
+        statsContainer.appendChild(maxStat);
+        
+        periodResult.appendChild(statsContainer);
+        ndviResultsContainer.appendChild(periodResult);
+    }
+}
+
+// Adiciona um novo período de data
+function addDatePeriod() {
+    periodCount++;
+    const periodsContainer = document.getElementById('periods-container');
+    
+    const periodItem = document.createElement('div');
+    periodItem.className = 'period-item';
+    periodItem.id = `period-${periodCount}`;
+    
+    const periodHeader = document.createElement('div');
+    periodHeader.className = 'period-header';
+    
+    const periodTitle = document.createElement('h4');
+    
+    // Criar o campo de input para o nome do período
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'period-name-input';
+    nameInput.value = `Período ${periodCount}`;
+    nameInput.setAttribute('data-default-value', `Período ${periodCount}`);
+    
+    // Adicionar evento para restaurar o valor padrão se o campo ficar vazio
+    nameInput.addEventListener('blur', function() {
+        if (this.value.trim() === '') {
+            this.value = this.getAttribute('data-default-value');
+        }
+    });
+    
+    // Adicionar evento para salvar o valor quando pressionar Enter
+    nameInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            this.blur();
+        }
+    });
+    
+    periodTitle.appendChild(nameInput);
+    
+    const deleteButton = document.createElement('button');
+    deleteButton.innerHTML = '<i class="fas fa-trash"></i>';
+    deleteButton.addEventListener('click', function() {
+        periodItem.remove();
+        updatePeriodCount();
+    });
+    
+    periodHeader.appendChild(periodTitle);
+    periodHeader.appendChild(deleteButton);
+    
+    const dateInputs = document.createElement('div');
+    dateInputs.className = 'date-inputs';
+    
+    // Data de início
+    const startDateGroup = document.createElement('div');
+    startDateGroup.className = 'date-input-group';
+    
+    const startDateLabel = document.createElement('label');
+    startDateLabel.htmlFor = `start-date-period-${periodCount}`;
+    startDateLabel.textContent = 'Data de Início';
+    
+    const startDateInput = document.createElement('input');
+    startDateInput.type = 'date';
+    startDateInput.id = `start-date-period-${periodCount}`;
+    startDateInput.required = true;
+    
+    startDateGroup.appendChild(startDateLabel);
+    startDateGroup.appendChild(startDateInput);
+    
+    // Data de fim
+    const endDateGroup = document.createElement('div');
+    endDateGroup.className = 'date-input-group';
+    
+    const endDateLabel = document.createElement('label');
+    endDateLabel.htmlFor = `end-date-period-${periodCount}`;
+    endDateLabel.textContent = 'Data de Fim';
+    
+    const endDateInput = document.createElement('input');
+    endDateInput.type = 'date';
+    endDateInput.id = `end-date-period-${periodCount}`;
+    endDateInput.required = true;
+    
+    endDateGroup.appendChild(endDateLabel);
+    endDateGroup.appendChild(endDateInput);
+    
+    dateInputs.appendChild(startDateGroup);
+    dateInputs.appendChild(endDateGroup);
+    
+    periodItem.appendChild(periodHeader);
+    periodItem.appendChild(dateInputs);
+    
+    periodsContainer.appendChild(periodItem);
+}
+
+// Atualiza a contagem de períodos
+function updatePeriodCount() {
+    const periodItems = document.querySelectorAll('.period-item');
+    periodCount = periodItems.length;
+    
+    // Atualiza os IDs e títulos
+    periodItems.forEach((item, index) => {
+        const newIndex = index + 1;
+        item.id = `period-${newIndex}`;
+        
+        const nameInput = item.querySelector('.period-name-input');
+        const defaultName = `Período ${newIndex}`;
+        nameInput.setAttribute('data-default-value', defaultName);
+        
+        // Só atualiza o valor se ainda estiver usando o padrão
+        if (nameInput.value === `Período ${item.id.split('-')[1]}`) {
+            nameInput.value = defaultName;
+        }
+        
+        const startDateInput = item.querySelector(`#start-date-period-${item.id.split('-')[1]}`);
+        startDateInput.id = `start-date-period-${newIndex}`;
+        
+        const endDateInput = item.querySelector(`#end-date-period-${item.id.split('-')[1]}`);
+        endDateInput.id = `end-date-period-${newIndex}`;
+        
+        const startDateLabel = item.querySelector(`label[for="start-date-period-${item.id.split('-')[1]}"]`);
+        startDateLabel.htmlFor = `start-date-period-${newIndex}`;
+        
+        const endDateLabel = item.querySelector(`label[for="end-date-period-${item.id.split('-')[1]}"]`);
+        endDateLabel.htmlFor = `end-date-period-${newIndex}`;
+    });
+}
+
+// Busca local usando Nominatim
+function searchLocation() {
+    const searchInput = document.getElementById('search-input');
+    const searchTerm = searchInput.value.trim();
+    
+    if (searchTerm === '') {
+        alert('Por favor, insira um termo de busca.');
+        return;
+    }
+    
+    const searchResults = document.getElementById('search-results');
+    searchResults.innerHTML = '<div class="search-result-item">Buscando...</div>';
+    
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchTerm)}&limit=5`)
         .then(response => response.json())
         .then(data => {
-            if (data.length > 0) {
-                const { lat, lon } = data[0];
-                map.setView([lat, lon], 12);
-                L.marker([lat, lon]).addTo(map).bindPopup(`Endereço: ${address}`).openPopup();
-            } else {
-                alert('Endereço não encontrado.');
+            searchResults.innerHTML = '';
+            
+            if (data.length === 0) {
+                searchResults.innerHTML = '<div class="search-result-item">Nenhum resultado encontrado.</div>';
+                return;
             }
+            
+            data.forEach(result => {
+                const resultItem = document.createElement('div');
+                resultItem.className = 'search-result-item';
+                resultItem.textContent = result.display_name;
+                resultItem.addEventListener('click', function() {
+                    map.setView([result.lat, result.lon], 12);
+                    searchResults.innerHTML = '';
+                    searchInput.value = '';
+                });
+                searchResults.appendChild(resultItem);
+            });
         })
-        .catch(err => {
-            console.error('Erro ao buscar endereço:', err);
+        .catch(error => {
+            console.error('Erro na busca:', error);
+            searchResults.innerHTML = '<div class="search-result-item">Erro ao buscar localização.</div>';
         });
+}
+
+// Alterna entre os mapas base
+function switchBasemap(basemapType) {
+    // Remove todos os mapas base
+    Object.values(basemaps).forEach(url => {
+        const layer = L.tileLayer(url);
+        if (map.hasLayer(layer)) {
+            map.removeLayer(layer);
+        }
+    });
+    
+    // Adiciona o mapa base selecionado
+    L.tileLayer(basemaps[basemapType], {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+    
+    // Atualiza o botão ativo
+    document.querySelectorAll('.basemap-buttons button').forEach(button => {
+        button.classList.remove('active');
+    });
+    document.getElementById(`${basemapType}-basemap`).classList.add('active');
+}
+
+// Inicialização quando o DOM estiver carregado
+document.addEventListener('DOMContentLoaded', function() {
+    initMap();
+    
+    // Adiciona evento ao botão de busca
+    document.getElementById('search-button').addEventListener('click', searchLocation);
+    document.getElementById('search-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            searchLocation();
+        }
+    });
+    
+    // Adiciona evento ao botão de adicionar período
+    document.getElementById('add-period-button').addEventListener('click', addDatePeriod);
+    
+    // Adiciona eventos aos botões de mapa base
+    document.getElementById('osm-basemap').addEventListener('click', function() {
+        switchBasemap('osm');
+    });
+    
+    document.getElementById('satellite-basemap').addEventListener('click', function() {
+        switchBasemap('satellite');
+    });
+    
+    document.getElementById('terrain-basemap').addEventListener('click', function() {
+        switchBasemap('terrain');
+    });
+    
+    // Adiciona um período inicial
+    addDatePeriod();
 });
