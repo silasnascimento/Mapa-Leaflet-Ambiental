@@ -1,4 +1,315 @@
-#map {
-    height: 700px;
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    height: 100vh;
+    overflow: hidden;
+}
+
+.container {
+    display: flex;
+    height: 100vh;
     width: 100%;
+}
+
+/* Sidebar Styles */
+.sidebar {
+    width: 350px;
+    height: 100%;
+    background-color: #f8f9fa;
+    border-right: 1px solid #dee2e6;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    z-index: 1000;
+}
+
+.sidebar-header {
+    padding: 15px;
+    background-color: #343a40;
+    color: white;
+    text-align: center;
+}
+
+.sidebar-header h2 {
+    font-size: 1.5rem;
+    margin: 0;
+}
+
+.search-container, .date-periods-container, .ndvi-results-container {
+    padding: 15px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.search-container h3, .date-periods-container h3, .ndvi-results-container h3 {
+    margin-bottom: 10px;
+    font-size: 1.1rem;
+    color: #495057;
+}
+
+.search-box {
+    display: flex;
+    margin-bottom: 10px;
+}
+
+.search-box input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px 0 0 4px;
+    font-size: 0.9rem;
+}
+
+.search-box button {
+    padding: 8px 12px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 0 4px 4px 0;
+    cursor: pointer;
+}
+
+#search-results {
+    max-height: 150px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    margin-top: 10px;
+}
+
+.search-result-item {
+    padding: 8px 12px;
+    border-bottom: 1px solid #dee2e6;
+    cursor: pointer;
+}
+
+.search-result-item:hover {
+    background-color: #e9ecef;
+}
+
+.period-item {
+    background-color: white;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+.period-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.period-header h4 {
+    margin: 0;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.period-name-input {
+    font-size: 1rem;
+    font-weight: bold;
+    border: 1px solid transparent;
+    background: transparent;
+    padding: 2px 4px;
+    border-radius: 3px;
+    width: auto;
+    min-width: 100px;
+}
+
+.period-name-input:hover {
+    border-color: #ced4da;
+}
+
+.period-name-input:focus {
+    outline: none;
+    border-color: #007bff;
+    background-color: white;
+}
+
+.period-header button {
+    background: none;
+    border: none;
+    color: #dc3545;
+    cursor: pointer;
+}
+
+.date-inputs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.date-input-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.date-input-group label {
+    font-size: 0.8rem;
+    margin-bottom: 2px;
+    color: #6c757d;
+}
+
+.date-input-group input {
+    padding: 6px 8px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.btn-primary {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    width: 100%;
+    margin-top: 10px;
+}
+
+.btn-primary:hover {
+    background-color: #0069d9;
+}
+
+#ndvi-results {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.ndvi-period-result {
+    background-color: white;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+.ndvi-period-result h4 {
+    margin-bottom: 8px;
+    font-size: 1rem;
+    color: #495057;
+}
+
+.ndvi-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.ndvi-stat {
+    text-align: center;
+    padding: 8px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+}
+
+.ndvi-stat-label {
+    font-size: 0.7rem;
+    color: #6c757d;
+    margin-bottom: 2px;
+}
+
+.ndvi-stat-value {
+    font-size: 0.9rem;
+    font-weight: bold;
+    color: #212529;
+}
+
+/* Map Container Styles */
+.map-container {
+    flex: 1;
+    position: relative;
+}
+
+#map {
+    height: 100%;
+    width: 100%;
+}
+
+.map-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background-color: white;
+    border-radius: 4px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    padding: 10px;
+    z-index: 1000;
+    width: 200px;
+}
+
+.basemap-control, .layer-control {
+    margin-bottom: 15px;
+}
+
+.basemap-control h4, .layer-control h4 {
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+    color: #495057;
+}
+
+.basemap-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.basemap-buttons button {
+    padding: 6px 10px;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.basemap-buttons button.active {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+.layer-control-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.layer-control-item input[type="checkbox"] {
+    margin-right: 8px;
+}
+
+.layer-control-item label {
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .container {
+        flex-direction: column;
+    }
+    
+    .sidebar {
+        width: 100%;
+        height: 40%;
+    }
+    
+    .map-container {
+        height: 60%;
+    }
 }
