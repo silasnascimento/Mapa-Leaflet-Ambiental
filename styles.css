@@ -313,3 +313,22 @@ body {
         height: 60%;
     }
 }
+
+/* Estilos para mensagens de erro */
+.error-message {
+    color: #d9534f;
+    background-color: #f9f2f2;
+    border: 1px solid #d9534f;
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin: 8px 0;
+    font-size: 14px;
+}
+
+.ndvi-period-result.error {
+    border: 1px solid #d9534f;
+    background-color: #f9f2f2;
+    padding: 10px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+}

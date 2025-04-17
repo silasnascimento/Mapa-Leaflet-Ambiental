@@ -127,27 +127,26 @@ function processPolygon() {
         roi: {
             type: 'Polygon',
             coordinates: [coordinates]
-        }
+        },
+        date_periods: []
     };
 
-    // Adiciona os períodos de data
+    // Adiciona os períodos de data no novo formato
     const periodElements = document.querySelectorAll('.period-item');
-    periodElements.forEach((element, index) => {
-        const startDate = element.querySelector(`#start-date-period-${index + 1}`).value;
-        const endDate = element.querySelector(`#end-date-period-${index + 1}`).value;
-        requestData[`start_date_period_${index + 1}`] = startDate;
-        requestData[`end_date_period_${index + 1}`] = endDate;
+    periodElements.forEach((element) => {
+        const periodNumber = element.id.split('-')[1];
+        const startDate = element.querySelector(`#start-date-period-${periodNumber}`).value;
+        const endDate = element.querySelector(`#end-date-period-${periodNumber}`).value;
+        requestData.date_periods.push([startDate, endDate]);
     });
 
-    // Faz as requisições para o servidor
-    fetchNDVIData(requestData);
-    fetchNDVITiles(requestData);
-    fetchImageTiles(requestData);
+    // Faz a requisição unificada para o servidor
+    fetchUnifiedResults(requestData);
 }
 
-// Busca os dados de NDVI do servidor
-function fetchNDVIData(requestData) {
-    fetch('https://api.setmapgeo.com/calculate_ndvi', {
+// Busca os resultados unificados do servidor
+function fetchUnifiedResults(requestData) {
+    fetch('https://api.setmapgeo.com/ndvi_composite', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -156,49 +155,14 @@ function fetchNDVIData(requestData) {
     })
     .then(response => response.json())
     .then(data => {
-        displayNDVIResults(data);
+        // Processa os resultados unificados
+        displayNDVIResults(data.ndvi);
+        addNDVILayers(data.ndvi_tiles);
+        addRGBLayers(data.image_tiles);
     })
     .catch(error => {
-        console.error('Erro ao buscar dados NDVI:', error);
-        alert('Erro ao buscar dados NDVI. Verifique o console para mais detalhes.');
-    });
-}
-
-// Busca os tiles de NDVI do servidor
-function fetchNDVITiles(requestData) {
-    fetch('https://api.setmapgeo.com/get_ndvi_tiles', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestData)
-    })
-    .then(response => response.json())
-    .then(data => {
-        addNDVILayers(data);
-    })
-    .catch(error => {
-        console.error('Erro ao buscar tiles NDVI:', error);
-        alert('Erro ao buscar tiles NDVI. Verifique o console para mais detalhes.');
-    });
-}
-
-// Busca os tiles de imagem RGB do servidor
-function fetchImageTiles(requestData) {
-    fetch('https://api.setmapgeo.com/get_image_tile', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestData)
-    })
-    .then(response => response.json())
-    .then(data => {
-        addRGBLayers(data);
-    })
-    .catch(error => {
-        console.error('Erro ao buscar tiles de imagem:', error);
-        alert('Erro ao buscar tiles de imagem. Verifique o console para mais detalhes.');
+        console.error('Erro ao buscar resultados:', error);
+        alert('Erro ao buscar resultados. Verifique o console para mais detalhes.');
     });
 }
 
@@ -212,8 +176,25 @@ function addNDVILayers(data) {
     });
     ndviLayers = {};
 
+    // Verifica se há erro global nos tiles de NDVI
+    if (data.error) {
+        console.error('Erro nos tiles de NDVI:', data.error);
+        const layerControls = document.getElementById('layer-controls');
+        const errorMessage = document.createElement('div');
+        errorMessage.className = 'error-message';
+        errorMessage.textContent = `Erro nos tiles de NDVI: ${data.error}`;
+        layerControls.appendChild(errorMessage);
+        return;
+    }
+
     // Adiciona novas camadas
     for (const [period, layerData] of Object.entries(data)) {
+        // Verifica se há erro no período específico
+        if (layerData.error) {
+            console.error(`Erro no período ${period}:`, layerData.error);
+            continue;
+        }
+
         const ndviLayer = L.tileLayer(layerData.tile_url, {
             opacity: 1
         });
@@ -249,7 +230,13 @@ function addNDVILayers(data) {
             }
         }
         
-        label.textContent = `NDVI ${periodName}`;
+        // Adiciona informação do satélite
+        const satellite = layerData.satellite || 'desconhecido';
+        const satelliteName = satellite === 'sentinel' ? 'Sentinel-2' : 
+                             satellite === 'landsat' ? 'Landsat 9' : 
+                             'Desconhecido';
+        
+        label.textContent = `NDVI ${periodName} (${satelliteName})`;
         
         layerControl.appendChild(checkbox);
         layerControl.appendChild(label);
@@ -267,8 +254,25 @@ function addRGBLayers(data) {
     });
     rgbLayers = {};
 
+    // Verifica se há erro global nos tiles de imagem
+    if (data.error) {
+        console.error('Erro nos tiles de imagem:', data.error);
+        const layerControls = document.getElementById('layer-controls');
+        const errorMessage = document.createElement('div');
+        errorMessage.className = 'error-message';
+        errorMessage.textContent = `Erro nos tiles de imagem: ${data.error}`;
+        layerControls.appendChild(errorMessage);
+        return;
+    }
+
     // Adiciona novas camadas
     for (const [period, layerData] of Object.entries(data)) {
+        // Verifica se há erro no período específico
+        if (layerData.error) {
+            console.error(`Erro no período ${period}:`, layerData.error);
+            continue;
+        }
+
         const rgbLayer = L.tileLayer(layerData.tile_url, {
             opacity: 1
         });
@@ -304,7 +308,13 @@ function addRGBLayers(data) {
             }
         }
         
-        label.textContent = `RGB ${periodName}`;
+        // Adiciona informação do satélite
+        const satellite = layerData.satellite || 'desconhecido';
+        const satelliteName = satellite === 'sentinel' ? 'Sentinel-2' : 
+                             satellite === 'landsat' ? 'Landsat 9' : 
+                             'Desconhecido';
+        
+        label.textContent = `RGB ${periodName} (${satelliteName})`;
         
         layerControl.appendChild(checkbox);
         layerControl.appendChild(label);
@@ -317,7 +327,35 @@ function displayNDVIResults(data) {
     const ndviResultsContainer = document.getElementById('ndvi-results');
     ndviResultsContainer.innerHTML = '';
 
+    // Verifica se há erro global nos dados de NDVI
+    if (data.error) {
+        const errorMessage = document.createElement('div');
+        errorMessage.className = 'error-message';
+        errorMessage.textContent = `Erro nos dados de NDVI: ${data.error}`;
+        ndviResultsContainer.appendChild(errorMessage);
+        return;
+    }
+
     for (const [period, stats] of Object.entries(data)) {
+        // Verifica se há erro no período específico
+        if (stats.error) {
+            console.error(`Erro no período ${period}:`, stats.error);
+            const periodResult = document.createElement('div');
+            periodResult.className = 'ndvi-period-result error';
+            
+            const periodTitle = document.createElement('h4');
+            periodTitle.textContent = `Período ${period.split('_')[1]}`;
+            periodResult.appendChild(periodTitle);
+            
+            const errorMessage = document.createElement('div');
+            errorMessage.className = 'error-message';
+            errorMessage.textContent = stats.error;
+            periodResult.appendChild(errorMessage);
+            
+            ndviResultsContainer.appendChild(periodResult);
+            continue;
+        }
+
         const periodResult = document.createElement('div');
         periodResult.className = 'ndvi-period-result';
         
@@ -335,7 +373,13 @@ function displayNDVIResults(data) {
             }
         }
         
-        periodTitle.textContent = periodName;
+        // Adiciona informação do satélite
+        const satellite = stats.satellite || 'desconhecido';
+        const satelliteName = satellite === 'sentinel' ? 'Sentinel-2' : 
+                             satellite === 'landsat' ? 'Landsat 9' : 
+                             'Desconhecido';
+        
+        periodTitle.textContent = `${periodName} (${satelliteName})`;
         periodResult.appendChild(periodTitle);
         
         const statsContainer = document.createElement('div');
@@ -346,7 +390,7 @@ function displayNDVIResults(data) {
         meanStat.className = 'ndvi-stat';
         meanStat.innerHTML = `
             <div class="ndvi-stat-label">Média</div>
-            <div class="ndvi-stat-value">${stats.ndvi_mean.toFixed(4)}</div>
+            <div class="ndvi-stat-value">${stats.ndvi_mean ? stats.ndvi_mean.toFixed(4) : 'N/A'}</div>
         `;
         statsContainer.appendChild(meanStat);
         
@@ -355,7 +399,7 @@ function displayNDVIResults(data) {
         minStat.className = 'ndvi-stat';
         minStat.innerHTML = `
             <div class="ndvi-stat-label">Mínimo</div>
-            <div class="ndvi-stat-value">${stats.ndvi_min.toFixed(4)}</div>
+            <div class="ndvi-stat-value">${stats.ndvi_min ? stats.ndvi_min.toFixed(4) : 'N/A'}</div>
         `;
         statsContainer.appendChild(minStat);
         
@@ -364,7 +408,7 @@ function displayNDVIResults(data) {
         maxStat.className = 'ndvi-stat';
         maxStat.innerHTML = `
             <div class="ndvi-stat-label">Máximo</div>
-            <div class="ndvi-stat-value">${stats.ndvi_max.toFixed(4)}</div>
+            <div class="ndvi-stat-value">${stats.ndvi_max ? stats.ndvi_max.toFixed(4) : 'N/A'}</div>
         `;
         statsContainer.appendChild(maxStat);
         
