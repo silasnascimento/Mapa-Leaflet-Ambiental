@@ -146,7 +146,7 @@ function processPolygon() {
 
 // Busca os resultados unificados do servidor
 function fetchUnifiedResults(requestData) {
-    fetch('https://api.setmapgeo.com/ndvi_composite', {
+    fetch('https://map.silasogis.com/ndvi_composite', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
