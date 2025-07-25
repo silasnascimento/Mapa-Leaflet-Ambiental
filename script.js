@@ -1,638 +1,305 @@
-// Inicialização do mapa Leaflet
-let map;
-let drawnItems;
-let currentPolygon = null;
-let periodCount = 0;
-let ndviLayers = {};
-let rgbLayers = {};
+document.addEventListener('DOMContentLoaded', function () {
+    const API_BASE_URL = 'https://map.silasogis.com';
 
-// URLs dos mapas base
-const basemaps = {
-    osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
-};
+    // --- Basemaps ---
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' });
+    const googleSat = L.tileLayer('http://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',{ maxZoom: 20, subdomains:['mt0','mt1','mt2','mt3'], attribution: '&copy; Google' });
+    const baseMaps = { "OpenStreetMap": osm, "Satélite (Google)": googleSat };
 
-// Inicialização do mapa
-function initMap() {
-    map = L.map('map', {
-        center: [-15.7801, -47.9292], // Centro do Brasil
-        zoom: 5,
-        zoomControl: false
-    });
+    // --- Map Initialization ---
+    const map = L.map('map', { layers: [googleSat] }).setView([-14.235, -51.925], 5);
+    const layerControl = L.control.layers(baseMaps, {}).addTo(map);
 
-    // Adiciona o mapa base OSM por padrão
-    L.tileLayer(basemaps.osm, {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
-
-    // Adiciona controles de zoom
-    L.control.zoom({
-        position: 'bottomright'
-    }).addTo(map);
-
-    // Inicializa a camada de desenho
-    drawnItems = new L.FeatureGroup();
+    // --- Layers & State ---
+    const drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
+    let drawnPolygon = null;
+    let drawnMarker = null;
 
-    // Adiciona controles de desenho
+    // --- Draw Control ---
     const drawControl = new L.Control.Draw({
         draw: {
-            polyline: false,
-            rectangle: false,
-            circle: false,
-            circlemarker: false,
-            marker: false,
-            polygon: {
-                allowIntersection: false,
-                drawError: {
-                    color: '#e1e100',
-                    message: '<strong>Erro:</strong> Polígonos não podem se intersectar!'
-                },
-                shapeOptions: {
-                    color: '#007bff',
-                    fillOpacity: 0
-                }
-            }
+            polygon: { shapeOptions: { color: '#4f46e5' } },
+            marker: true,
+            polyline: false, circlemarker: false, rectangle: false, circle: false
         },
-        edit: {
-            featureGroup: drawnItems,
-            remove: true
-        }
+        edit: { featureGroup: drawnItems }
     });
     map.addControl(drawControl);
-
-    // Eventos de desenho
-    map.on('draw:created', onDrawCreated);
-    map.on('draw:edited', onDrawEdited);
-    map.on('draw:deleted', onDrawDeleted);
-}
-
-// Manipulador de evento quando um polígono é desenhado
-function onDrawCreated(e) {
-    drawnItems.clearLayers();
-    drawnItems.addLayer(e.layer);
-    currentPolygon = e.layer;
-    updateLayerControls();
-}
-
-// Manipulador de evento quando um polígono é editado
-function onDrawEdited(e) {
-    const layers = e.layers;
-    layers.eachLayer(function(layer) {
-        currentPolygon = layer;
-    });
-    updateLayerControls();
-}
-
-// Manipulador de evento quando um polígono é deletado
-function onDrawDeleted(e) {
-    currentPolygon = null;
-    updateLayerControls();
-}
-
-// Atualiza os controles de camada com base no polígono atual
-function updateLayerControls() {
-    const layerControls = document.getElementById('layer-controls');
-    layerControls.innerHTML = '';
     
-    if (currentPolygon) {
-        // Adiciona botão para processar o polígono
-        const processButton = document.createElement('button');
-        processButton.className = 'btn-primary';
-        processButton.innerHTML = '<i class="fas fa-calculator"></i> Processar NDVI';
-        processButton.addEventListener('click', processPolygon);
-        layerControls.appendChild(processButton);
-    }
-}
+    // --- DOM Elements ---
+    const analyzeNdviBtn = document.getElementById('analyze-ndvi-btn');
+    const analyzeClimateBtn = document.getElementById('analyze-climate-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const addPeriodBtn = document.getElementById('add-period-btn');
+    const datePeriodsContainer = document.getElementById('date-periods-container');
+    const resultsContainer = document.getElementById('results-container');
+    
+    let activeTileLayers = {};
+    let activeLegends = {};
 
-// Processa o polígono desenhado
-function processPolygon() {
-    if (!currentPolygon) {
-        alert('Por favor, desenhe um polígono primeiro.');
-        return;
-    }
+    // --- Event Listeners ---
+    map.on(L.Draw.Event.CREATED, function (event) {
+        const type = event.layerType;
+        const layer = event.layer;
 
-    if (periodCount === 0) {
-        alert('Por favor, adicione pelo menos um período de data.');
-        return;
-    }
-
-    // Obtém as coordenadas do polígono
-    const coordinates = currentPolygon.getLatLngs()[0].map(latlng => [latlng.lng, latlng.lat]);
-    coordinates.push(coordinates[0]); // Fecha o polígono
-
-    // Prepara os dados para enviar ao servidor
-    const requestData = {
-        roi: {
-            type: 'Polygon',
-            coordinates: [coordinates]
-        },
-        date_periods: []
-    };
-
-    // Adiciona os períodos de data no novo formato
-    const periodElements = document.querySelectorAll('.period-item');
-    periodElements.forEach((element) => {
-        const periodNumber = element.id.split('-')[1];
-        const startDate = element.querySelector(`#start-date-period-${periodNumber}`).value;
-        const endDate = element.querySelector(`#end-date-period-${periodNumber}`).value;
-        requestData.date_periods.push([startDate, endDate]);
-    });
-
-    // Faz a requisição unificada para o servidor
-    fetchUnifiedResults(requestData);
-}
-
-// Busca os resultados unificados do servidor
-function fetchUnifiedResults(requestData) {
-    fetch('https://map.silasogis.com/ndvi_composite', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestData)
-    })
-    .then(response => response.json())
-    .then(data => {
-        // Processa os resultados unificados
-        displayNDVIResults(data.ndvi);
-        addNDVILayers(data.ndvi_tiles);
-        addRGBLayers(data.image_tiles);
-    })
-    .catch(error => {
-        console.error('Erro ao buscar resultados:', error);
-        alert('Erro ao buscar resultados. Verifique o console para mais detalhes.');
-    });
-}
-
-// Adiciona as camadas de NDVI ao mapa
-function addNDVILayers(data) {
-    // Remove camadas anteriores
-    Object.values(ndviLayers).forEach(layer => {
-        if (map.hasLayer(layer)) {
-            map.removeLayer(layer);
+        if (type === 'polygon') {
+            if (drawnPolygon) drawnItems.removeLayer(drawnPolygon);
+            drawnPolygon = layer;
+        } else if (type === 'marker') {
+            if (drawnMarker) drawnItems.removeLayer(drawnMarker);
+            drawnMarker = layer;
         }
+        drawnItems.addLayer(layer);
+        updateAnalyzeButtonsState();
     });
-    ndviLayers = {};
 
-    // Verifica se há erro global nos tiles de NDVI
-    if (data.error) {
-        console.error('Erro nos tiles de NDVI:', data.error);
-        const layerControls = document.getElementById('layer-controls');
-        const errorMessage = document.createElement('div');
-        errorMessage.className = 'error-message';
-        errorMessage.textContent = `Erro nos tiles de NDVI: ${data.error}`;
-        layerControls.appendChild(errorMessage);
-        return;
-    }
-
-    // Adiciona novas camadas
-    for (const [period, layerData] of Object.entries(data)) {
-        // Verifica se há erro no período específico
-        if (layerData.error) {
-            console.error(`Erro no período ${period}:`, layerData.error);
-            continue;
-        }
-
-        const ndviLayer = L.tileLayer(layerData.tile_url, {
-            opacity: 1
+    map.on(L.Draw.Event.EDITED, function (event) {
+        // Atualiza as referências se forem editadas
+        event.layers.eachLayer(function (layer) {
+            if (layer instanceof L.Polygon) drawnPolygon = layer;
+            if (layer instanceof L.Marker) drawnMarker = layer;
         });
-        ndviLayers[period] = ndviLayer;
-        
-        // Adiciona ao controle de camadas
-        const layerControl = document.createElement('div');
-        layerControl.className = 'layer-control-item';
-        
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.id = `ndvi-${period}`;
-        checkbox.addEventListener('change', function() {
-            if (this.checked) {
-                map.addLayer(ndviLayers[period]);
-            } else {
-                map.removeLayer(ndviLayers[period]);
-            }
-        });
-        
-        const label = document.createElement('label');
-        label.htmlFor = `ndvi-${period}`;
-        
-        // Obter o nome personalizado do período, se existir
-        const periodNumber = period.split('_')[1];
-        const periodElement = document.getElementById(`period-${periodNumber}`);
-        let periodName = period.replace('period_', 'Período ');
-        
-        if (periodElement) {
-            const nameInput = periodElement.querySelector('.period-name-input');
-            if (nameInput && nameInput.value !== nameInput.getAttribute('data-default-value')) {
-                periodName = nameInput.value;
-            }
-        }
-        
-        // Adiciona informação do satélite
-        const satellite = layerData.satellite || 'desconhecido';
-        const satelliteName = satellite === 'sentinel' ? 'Sentinel-2' : 
-                             satellite === 'landsat' ? 'Landsat 9' : 
-                             'Desconhecido';
-        
-        label.textContent = `NDVI ${periodName} (${satelliteName})`;
-        
-        layerControl.appendChild(checkbox);
-        layerControl.appendChild(label);
-        document.getElementById('layer-controls').appendChild(layerControl);
-    }
-}
-
-// Adiciona as camadas de imagem RGB ao mapa
-function addRGBLayers(data) {
-    // Remove camadas anteriores
-    Object.values(rgbLayers).forEach(layer => {
-        if (map.hasLayer(layer)) {
-            map.removeLayer(layer);
-        }
     });
-    rgbLayers = {};
 
-    // Verifica se há erro global nos tiles de imagem
-    if (data.error) {
-        console.error('Erro nos tiles de imagem:', data.error);
-        const layerControls = document.getElementById('layer-controls');
-        const errorMessage = document.createElement('div');
-        errorMessage.className = 'error-message';
-        errorMessage.textContent = `Erro nos tiles de imagem: ${data.error}`;
-        layerControls.appendChild(errorMessage);
-        return;
-    }
-
-    // Adiciona novas camadas
-    for (const [period, layerData] of Object.entries(data)) {
-        // Verifica se há erro no período específico
-        if (layerData.error) {
-            console.error(`Erro no período ${period}:`, layerData.error);
-            continue;
-        }
-
-        const rgbLayer = L.tileLayer(layerData.tile_url, {
-            opacity: 1
-        });
-        rgbLayers[period] = rgbLayer;
-        
-        // Adiciona ao controle de camadas
-        const layerControl = document.createElement('div');
-        layerControl.className = 'layer-control-item';
-        
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.id = `rgb-${period}`;
-        checkbox.addEventListener('change', function() {
-            if (this.checked) {
-                map.addLayer(rgbLayers[period]);
-            } else {
-                map.removeLayer(rgbLayers[period]);
-            }
-        });
-        
-        const label = document.createElement('label');
-        label.htmlFor = `rgb-${period}`;
-        
-        // Obter o nome personalizado do período, se existir
-        const periodNumber = period.split('_')[1];
-        const periodElement = document.getElementById(`period-${periodNumber}`);
-        let periodName = period.replace('period_', 'Período ');
-        
-        if (periodElement) {
-            const nameInput = periodElement.querySelector('.period-name-input');
-            if (nameInput && nameInput.value !== nameInput.getAttribute('data-default-value')) {
-                periodName = nameInput.value;
-            }
-        }
-        
-        // Adiciona informação do satélite
-        const satellite = layerData.satellite || 'desconhecido';
-        const satelliteName = satellite === 'sentinel' ? 'Sentinel-2' : 
-                             satellite === 'landsat' ? 'Landsat 9' : 
-                             'Desconhecido';
-        
-        label.textContent = `RGB ${periodName} (${satelliteName})`;
-        
-        layerControl.appendChild(checkbox);
-        layerControl.appendChild(label);
-        document.getElementById('layer-controls').appendChild(layerControl);
-    }
-}
-
-// Exibe os resultados de NDVI na sidebar
-function displayNDVIResults(data) {
-    const ndviResultsContainer = document.getElementById('ndvi-results');
-    ndviResultsContainer.innerHTML = '';
-
-    // Verifica se há erro global nos dados de NDVI
-    if (data.error) {
-        const errorMessage = document.createElement('div');
-        errorMessage.className = 'error-message';
-        errorMessage.textContent = `Erro nos dados de NDVI: ${data.error}`;
-        ndviResultsContainer.appendChild(errorMessage);
-        return;
-    }
-
-    for (const [period, stats] of Object.entries(data)) {
-        // Verifica se há erro no período específico
-        if (stats.error) {
-            console.error(`Erro no período ${period}:`, stats.error);
-            const periodResult = document.createElement('div');
-            periodResult.className = 'ndvi-period-result error';
-            
-            const periodTitle = document.createElement('h4');
-            periodTitle.textContent = `Período ${period.split('_')[1]}`;
-            periodResult.appendChild(periodTitle);
-            
-            const errorMessage = document.createElement('div');
-            errorMessage.className = 'error-message';
-            errorMessage.textContent = stats.error;
-            periodResult.appendChild(errorMessage);
-            
-            ndviResultsContainer.appendChild(periodResult);
-            continue;
-        }
-
-        const periodResult = document.createElement('div');
-        periodResult.className = 'ndvi-period-result';
-        
-        const periodTitle = document.createElement('h4');
-        
-        // Obter o nome personalizado do período, se existir
-        const periodNumber = period.split('_')[1];
-        const periodElement = document.getElementById(`period-${periodNumber}`);
-        let periodName = period.replace('period_', 'Período ');
-        
-        if (periodElement) {
-            const nameInput = periodElement.querySelector('.period-name-input');
-            if (nameInput && nameInput.value !== nameInput.getAttribute('data-default-value')) {
-                periodName = nameInput.value;
-            }
-        }
-        
-        // Adiciona informação do satélite
-        const satellite = stats.satellite || 'desconhecido';
-        const satelliteName = satellite === 'sentinel' ? 'Sentinel-2' : 
-                             satellite === 'landsat' ? 'Landsat 9' : 
-                             'Desconhecido';
-        
-        periodTitle.textContent = `${periodName} (${satelliteName})`;
-        periodResult.appendChild(periodTitle);
-        
-        const statsContainer = document.createElement('div');
-        statsContainer.className = 'ndvi-stats';
-        
-        // Média
-        const meanStat = document.createElement('div');
-        meanStat.className = 'ndvi-stat';
-        meanStat.innerHTML = `
-            <div class="ndvi-stat-label">Média</div>
-            <div class="ndvi-stat-value">${stats.ndvi_mean ? stats.ndvi_mean.toFixed(4) : 'N/A'}</div>
-        `;
-        statsContainer.appendChild(meanStat);
-        
-        // Mínimo
-        const minStat = document.createElement('div');
-        minStat.className = 'ndvi-stat';
-        minStat.innerHTML = `
-            <div class="ndvi-stat-label">Mínimo</div>
-            <div class="ndvi-stat-value">${stats.ndvi_min ? stats.ndvi_min.toFixed(4) : 'N/A'}</div>
-        `;
-        statsContainer.appendChild(minStat);
-        
-        // Máximo
-        const maxStat = document.createElement('div');
-        maxStat.className = 'ndvi-stat';
-        maxStat.innerHTML = `
-            <div class="ndvi-stat-label">Máximo</div>
-            <div class="ndvi-stat-value">${stats.ndvi_max ? stats.ndvi_max.toFixed(4) : 'N/A'}</div>
-        `;
-        statsContainer.appendChild(maxStat);
-        
-        periodResult.appendChild(statsContainer);
-        ndviResultsContainer.appendChild(periodResult);
-    }
-}
-
-// Adiciona um novo período de data
-function addDatePeriod() {
-    periodCount++;
-    const periodsContainer = document.getElementById('periods-container');
-    
-    const periodItem = document.createElement('div');
-    periodItem.className = 'period-item';
-    periodItem.id = `period-${periodCount}`;
-    
-    const periodHeader = document.createElement('div');
-    periodHeader.className = 'period-header';
-    
-    const periodTitle = document.createElement('h4');
-    
-    // Criar o campo de input para o nome do período
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.className = 'period-name-input';
-    nameInput.value = `Período ${periodCount}`;
-    nameInput.setAttribute('data-default-value', `Período ${periodCount}`);
-    
-    // Adicionar evento para restaurar o valor padrão se o campo ficar vazio
-    nameInput.addEventListener('blur', function() {
-        if (this.value.trim() === '') {
-            this.value = this.getAttribute('data-default-value');
-        }
+    map.on(L.Draw.Event.DELETED, function() {
+        // Resetar referências ao deletar
+        if (drawnPolygon && !drawnItems.hasLayer(drawnPolygon.leaflet_id)) drawnPolygon = null;
+        if (drawnMarker && !drawnItems.hasLayer(drawnMarker.leaflet_id)) drawnMarker = null;
+        updateAnalyzeButtonsState();
     });
     
-    // Adicionar evento para salvar o valor quando pressionar Enter
-    nameInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            this.blur();
-        }
-    });
-    
-    periodTitle.appendChild(nameInput);
-    
-    const deleteButton = document.createElement('button');
-    deleteButton.innerHTML = '<i class="fas fa-trash"></i>';
-    deleteButton.addEventListener('click', function() {
-        periodItem.remove();
-        updatePeriodCount();
-    });
-    
-    periodHeader.appendChild(periodTitle);
-    periodHeader.appendChild(deleteButton);
-    
-    const dateInputs = document.createElement('div');
-    dateInputs.className = 'date-inputs';
-    
-    // Data de início
-    const startDateGroup = document.createElement('div');
-    startDateGroup.className = 'date-input-group';
-    
-    const startDateLabel = document.createElement('label');
-    startDateLabel.htmlFor = `start-date-period-${periodCount}`;
-    startDateLabel.textContent = 'Data de Início';
-    
-    const startDateInput = document.createElement('input');
-    startDateInput.type = 'date';
-    startDateInput.id = `start-date-period-${periodCount}`;
-    startDateInput.required = true;
-    
-    startDateGroup.appendChild(startDateLabel);
-    startDateGroup.appendChild(startDateInput);
-    
-    // Data de fim
-    const endDateGroup = document.createElement('div');
-    endDateGroup.className = 'date-input-group';
-    
-    const endDateLabel = document.createElement('label');
-    endDateLabel.htmlFor = `end-date-period-${periodCount}`;
-    endDateLabel.textContent = 'Data de Fim';
-    
-    const endDateInput = document.createElement('input');
-    endDateInput.type = 'date';
-    endDateInput.id = `end-date-period-${periodCount}`;
-    endDateInput.required = true;
-    
-    endDateGroup.appendChild(endDateLabel);
-    endDateGroup.appendChild(endDateInput);
-    
-    dateInputs.appendChild(startDateGroup);
-    dateInputs.appendChild(endDateGroup);
-    
-    periodItem.appendChild(periodHeader);
-    periodItem.appendChild(dateInputs);
-    
-    periodsContainer.appendChild(periodItem);
-}
+    addPeriodBtn.addEventListener('click', addDatePeriod);
+    analyzeNdviBtn.addEventListener('click', handleNdviAnalysis);
+    analyzeClimateBtn.addEventListener('click', handleClimateAnalysis);
+    clearBtn.addEventListener('click', clearAll);
 
-// Atualiza a contagem de períodos
-function updatePeriodCount() {
-    const periodItems = document.querySelectorAll('.period-item');
-    periodCount = periodItems.length;
-    
-    // Atualiza os IDs e títulos
-    periodItems.forEach((item, index) => {
-        const newIndex = index + 1;
-        item.id = `period-${newIndex}`;
-        
-        const nameInput = item.querySelector('.period-name-input');
-        const defaultName = `Período ${newIndex}`;
-        nameInput.setAttribute('data-default-value', defaultName);
-        
-        // Só atualiza o valor se ainda estiver usando o padrão
-        if (nameInput.value === `Período ${item.id.split('-')[1]}`) {
-            nameInput.value = defaultName;
-        }
-        
-        const startDateInput = item.querySelector(`#start-date-period-${item.id.split('-')[1]}`);
-        startDateInput.id = `start-date-period-${newIndex}`;
-        
-        const endDateInput = item.querySelector(`#end-date-period-${item.id.split('-')[1]}`);
-        endDateInput.id = `end-date-period-${newIndex}`;
-        
-        const startDateLabel = item.querySelector(`label[for="start-date-period-${item.id.split('-')[1]}"]`);
-        startDateLabel.htmlFor = `start-date-period-${newIndex}`;
-        
-        const endDateLabel = item.querySelector(`label[for="end-date-period-${item.id.split('-')[1]}"]`);
-        endDateLabel.htmlFor = `end-date-period-${newIndex}`;
-    });
-}
-
-// Busca local usando Nominatim
-function searchLocation() {
-    const searchInput = document.getElementById('search-input');
-    const searchTerm = searchInput.value.trim();
-    
-    if (searchTerm === '') {
-        alert('Por favor, insira um termo de busca.');
-        return;
+    // --- Functions ---
+    function updateAnalyzeButtonsState() {
+        analyzeNdviBtn.disabled = drawnPolygon === null;
+        analyzeClimateBtn.disabled = drawnPolygon === null && drawnMarker === null;
     }
-    
-    const searchResults = document.getElementById('search-results');
-    searchResults.innerHTML = '<div class="search-result-item">Buscando...</div>';
-    
-    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchTerm)}&limit=5`)
-        .then(response => response.json())
-        .then(data => {
-            searchResults.innerHTML = '';
-            
-            if (data.length === 0) {
-                searchResults.innerHTML = '<div class="search-result-item">Nenhum resultado encontrado.</div>';
-                return;
-            }
-            
-            data.forEach(result => {
-                const resultItem = document.createElement('div');
-                resultItem.className = 'search-result-item';
-                resultItem.textContent = result.display_name;
-                resultItem.addEventListener('click', function() {
-                    map.setView([result.lat, result.lon], 12);
-                    searchResults.innerHTML = '';
-                    searchInput.value = '';
-                });
-                searchResults.appendChild(resultItem);
+
+    function addDatePeriod() {
+        const periodCount = datePeriodsContainer.children.length + 1;
+        const newPeriod = document.createElement('div');
+        newPeriod.className = 'date-period-item mb-3 p-3 border rounded-lg bg-gray-50';
+        newPeriod.innerHTML = `<label class="block text-sm font-medium text-gray-600 mb-1">Período ${periodCount}</label><div class="flex space-x-2"><input type="date" class="start-date w-full p-2 border rounded-md text-sm"><input type="date" class="end-date w-full p-2 border rounded-md text-sm"></div>`;
+        datePeriodsContainer.appendChild(newPeriod);
+    }
+
+    function getPeriods() {
+        return Array.from(document.querySelectorAll('.date-period-item')).map(item => {
+            const start = item.querySelector('.start-date').value;
+            const end = item.querySelector('.end-date').value;
+            if (!start || !end) return null;
+            return [start, end];
+        }).filter(p => p);
+    }
+
+    async function handleApiRequest(endpoint, payload, analysisType) {
+        showLoader(`Analisando ${analysisType}...`);
+        try {
+            const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
-        })
-        .catch(error => {
-            console.error('Erro na busca:', error);
-            searchResults.innerHTML = '<div class="search-result-item">Erro ao buscar localização.</div>';
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `Erro na API: ${response.statusText}`);
+            }
+            return await response.json();
+        } catch (error) {
+            displayError(error.message);
+            return null;
+        } finally {
+            hideLoader();
+        }
+    }
+
+    async function handleNdviAnalysis() {
+        if (!drawnPolygon) {
+            alert('Por favor, desenhe um polígono no mapa primeiro.');
+            return;
+        }
+        const periods = getPeriods();
+        if (periods.length === 0) {
+            alert('Por favor, defina pelo menos um período de data válido.');
+            return;
+        }
+        const payload = {
+            roi: drawnPolygon.toGeoJSON().geometry,
+            date_periods: periods
+        };
+        clearResults();
+        const result = await handleApiRequest('/ndvi_composite', payload, 'NDVI');
+        if (result) displayNdviResults(result);
+    }
+    
+    async function handleClimateAnalysis() {
+        let point_coords;
+        if (drawnMarker) {
+            const latlng = drawnMarker.getLatLng();
+            point_coords = [latlng.lng, latlng.lat];
+        } else if (drawnPolygon) {
+            const centroid = drawnPolygon.getBounds().getCenter();
+            point_coords = [centroid.lng, centroid.lat];
+        } else {
+            alert('Adicione um ponto no mapa ou desenhe um polígono primeiro.');
+            return;
+        }
+
+        const periods = getPeriods();
+        if (periods.length === 0) {
+            alert('Por favor, defina pelo menos um período de data válido.');
+            return;
+        }
+
+        const payload = {
+            point: { type: "Point", coordinates: point_coords },
+            date_periods: periods
+        };
+        
+        resultsContainer.innerHTML = '';
+        
+        const result = await handleApiRequest('/climate_stats', payload, 'Dados Climáticos');
+        if (result) {
+            if(result.precipitation) displayChirpsResults(result.precipitation);
+            if(result.temperature) displayEra5Results(result.temperature);
+        }
+    }
+
+    function displayNdviResults(data) {
+        const { ndvi, ndvi_tiles, image_tiles } = data;
+        resultsContainer.innerHTML = ''; 
+        
+        for (const period in ndvi) {
+            if (ndvi[period].error) {
+                displayError(`NDVI Período ${period.replace('period_','')}: ${ndvi[period].error}`);
+                continue;
+            }
+            const card = createResultCard(`NDVI - ${period.replace('period_','Período ')} (Satélite: ${ndvi[period].satellite})`);
+            card.innerHTML += `<p><strong>Média:</strong> ${ndvi[period].ndvi_mean.toFixed(3)}</p><p><strong>Mín:</strong> ${ndvi[period].ndvi_min.toFixed(3)}</p><p><strong>Máx:</strong> ${ndvi[period].ndvi_max.toFixed(3)}</p>`;
+            resultsContainer.appendChild(card);
+        }
+
+        let ndviLegendAdded = false;
+        if (ndvi_tiles) {
+            Object.keys(ndvi_tiles).forEach((periodKey, index) => {
+                const periodData = ndvi_tiles[periodKey];
+                if (periodData.tile_url) {
+                    addTileLayer(`NDVI - ${periodKey.replace('period_','P')}`, periodData.tile_url, index === 0);
+                    if (!ndviLegendAdded) {
+                        addLegend('NDVI', { min: 0, max: 0.8, palette: ['red', 'yellow', 'green'] });
+                        ndviLegendAdded = true;
+                    }
+                }
+            });
+        }
+        if (image_tiles) {
+            Object.keys(image_tiles).forEach((periodKey, index) => {
+                if (image_tiles[periodKey].tile_url) addTileLayer(`RGB - ${periodKey.replace('period_','P')}`, image_tiles[periodKey].tile_url, false);
+            });
+        }
+    }
+    
+    function displayChirpsResults(precipitation_stats) {
+        for (const period in precipitation_stats) {
+            if (precipitation_stats[period].error) {
+                displayError(`Precipitação ${period.replace('period_','')}: ${precipitation_stats[period].error}`);
+                continue;
+            }
+            const stats = precipitation_stats[period];
+            const card = createResultCard(`Precipitação - ${period.replace('period_','Período ')}`);
+            card.innerHTML += `<p><strong>Total no Período:</strong> ${stats.precipitation_sum !== null ? stats.precipitation_sum.toFixed(2) : 'N/D'} mm</p>
+                                <p><strong>Média Diária:</strong> ${stats.precipitation_daily_mean !== null ? stats.precipitation_daily_mean.toFixed(2) : 'N/D'} mm/dia</p>`;
+            resultsContainer.appendChild(card);
+        }
+    }
+    
+    function displayEra5Results(temperature_stats) {
+        for (const period in temperature_stats) {
+            if (temperature_stats[period].error) {
+                displayError(`Temperatura ${period.replace('period_','')}: ${temperature_stats[period].error}`);
+                continue;
+            }
+            const stats = temperature_stats[period];
+            const card = createResultCard(`Temperatura - ${period.replace('period_','Período ')}`);
+            card.innerHTML += `<p><strong>Média:</strong> ${stats.temperature_mean_celsius !== null ? stats.temperature_mean_celsius.toFixed(2) : 'N/D'} °C</p>
+                                <p><strong>Mínima:</strong> ${stats.temperature_min_celsius !== null ? stats.temperature_min_celsius.toFixed(2) : 'N/D'} °C</p>
+                                <p><strong>Máxima:</strong> ${stats.temperature_max_celsius !== null ? stats.temperature_max_celsius.toFixed(2) : 'N/D'} °C</p>`;
+            resultsContainer.appendChild(card);
+        }
+    }
+    
+    function addTileLayer(name, url, visible = true) {
+        if (activeTileLayers[name]) {
+            map.removeLayer(activeTileLayers[name]);
+            layerControl.removeLayer(activeTileLayers[name]);
+        }
+        const tileLayer = L.tileLayer(url, { opacity: 0.8 });
+        if (visible) tileLayer.addTo(map);
+        activeTileLayers[name] = tileLayer;
+        layerControl.addOverlay(tileLayer, name);
+    }
+    
+    function addLegend(title, visParams) {
+        if (activeLegends[title]) {
+            map.removeControl(activeLegends[title]);
+        }
+        const legend = L.control({position: 'bottomright'});
+        legend.onAdd = function (map) {
+            const div = L.DomUtil.create('div', 'info-card legend p-2 rounded-md');
+            const gradient = visParams.palette.join(',');
+            div.innerHTML += `<h4 class="font-bold mb-1">${title}</h4><i style="background: linear-gradient(to top, ${gradient}); height: 80px; width: 20px; display: block; float: left;"></i><div style="float: left; margin-left: 10px; position: relative; height: 80px;"><span style="position: absolute; top: -5px;">${visParams.max.toFixed(1)}</span><span style="position: absolute; bottom: -5px;">${visParams.min.toFixed(1)}</span></div>`;
+            return div;
+        };
+        legend.addTo(map);
+        activeLegends[title] = legend;
+    }
+
+    function showLoader(message) {
+        resultsContainer.innerHTML = `<div class="flex flex-col items-center justify-center p-4 bg-gray-50 rounded-lg"><div class="loader"></div><p class="mt-3 text-gray-600 font-medium">${message}</p></div>`;
+    }
+
+    function hideLoader() {
+        const loader = resultsContainer.querySelector('.loader')?.parentElement;
+        if (loader) loader.remove();
+    }
+    
+    function displayError(message) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg mb-4';
+        errorDiv.textContent = `Erro: ${message}`;
+        resultsContainer.appendChild(errorDiv);
+    }
+    
+    function createResultCard(title) {
+        const card = document.createElement('div');
+        card.className = 'p-4 bg-white border rounded-lg shadow-sm mb-4';
+        card.innerHTML = `<h3 class="text-md font-bold text-indigo-700 mb-2">${title}</h3>`;
+        return card;
+    }
+
+    function clearResults() {
+        resultsContainer.innerHTML = '';
+        Object.values(activeTileLayers).forEach(layer => {
+            if (map.hasLayer(layer)) map.removeLayer(layer);
+            layerControl.removeLayer(layer);
         });
-}
-
-// Alterna entre os mapas base
-function switchBasemap(basemapType) {
-    // Remove todos os mapas base
-    Object.values(basemaps).forEach(url => {
-        const layer = L.tileLayer(url);
-        if (map.hasLayer(layer)) {
-            map.removeLayer(layer);
-        }
-    });
+        activeTileLayers = {};
+        Object.values(activeLegends).forEach(legend => map.removeControl(legend));
+        activeLegends = {};
+    }
     
-    // Adiciona o mapa base selecionado
-    L.tileLayer(basemaps[basemapType], {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
-    
-    // Atualiza o botão ativo
-    document.querySelectorAll('.basemap-buttons button').forEach(button => {
-        button.classList.remove('active');
-    });
-    document.getElementById(`${basemapType}-basemap`).classList.add('active');
-}
-
-// Inicialização quando o DOM estiver carregado
-document.addEventListener('DOMContentLoaded', function() {
-    initMap();
-    
-    // Adiciona evento ao botão de busca
-    document.getElementById('search-button').addEventListener('click', searchLocation);
-    document.getElementById('search-input').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            searchLocation();
-        }
-    });
-    
-    // Adiciona evento ao botão de adicionar período
-    document.getElementById('add-period-button').addEventListener('click', addDatePeriod);
-    
-    // Adiciona eventos aos botões de mapa base
-    document.getElementById('osm-basemap').addEventListener('click', function() {
-        switchBasemap('osm');
-    });
-    
-    document.getElementById('satellite-basemap').addEventListener('click', function() {
-        switchBasemap('satellite');
-    });
-    
-    document.getElementById('terrain-basemap').addEventListener('click', function() {
-        switchBasemap('terrain');
-    });
-    
-    // Adiciona um período inicial
-    addDatePeriod();
+    function clearAll() {
+        clearResults();
+        drawnItems.clearLayers();
+        drawnPolygon = null;
+        drawnMarker = null;
+        updateAnalyzeButtonsState();
+        
+        datePeriodsContainer.innerHTML = `<div class="date-period-item mb-3 p-3 border rounded-lg bg-gray-50"><label class="block text-sm font-medium text-gray-600 mb-1">Período 1</label><div class="flex space-x-2"><input type="date" class="start-date w-full p-2 border rounded-md text-sm" value="2025-01-01"><input type="date" class="end-date w-full p-2 border rounded-md text-sm" value="2025-01-31"></div></div>`;
+    }
 });
